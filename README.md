@@ -5,7 +5,7 @@ ArcGIS GeoEvent Processor Multicardinal Field Splitter Processor for splitting a
 ![App](multicardinal-field-splitter-for-geoevent.gif?raw=true)
 
 ## Features
-* Field Splitter Processor
+* Multicardinal Field Splitter Processor
 
 ## Instructions
 
