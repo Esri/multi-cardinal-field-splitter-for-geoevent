@@ -15,6 +15,7 @@ import org.osgi.util.tracker.ServiceTracker;
 import org.osgi.util.tracker.ServiceTrackerCustomizer;
 
 import com.esri.ges.core.component.ComponentException;
+import com.esri.ges.core.geoevent.DefaultFieldDefinition;
 import com.esri.ges.core.geoevent.Field;
 import com.esri.ges.core.geoevent.FieldCardinality;
 import com.esri.ges.core.geoevent.FieldDefinition;
@@ -144,10 +145,12 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
           {
             return;
           }
+          int childId = 0;
           for (FieldGroup fg : fieldgroups)
           {
             List<FieldDefinition> fds = fdToSplit.getChildren();
-            appendFieldValuesAndSend(sourceGeoEvent, edOut, fg, fds.size());
+            appendFieldValuesAndSend(sourceGeoEvent, edOut, fg, fds.size(), childId);
+            childId++;
           }                  
         }
         else
@@ -157,9 +160,11 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
           {
             return;
           }
+          int childId = 0;
           for (Object fv : fieldValues)
           {
-            appendFieldValuesAndSend(sourceGeoEvent, edOut, fv, 1);            
+            appendFieldValuesAndSend(sourceGeoEvent, edOut, fv, 1, childId);            
+            childId++;
           }
         }
       }
@@ -171,19 +176,21 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
     }
   }
 
-  private void appendFieldValuesAndSend(GeoEvent sourceGeoEvent, GeoEventDefinition edOut, Object v, int count) throws MessagingException
+  private void appendFieldValuesAndSend(GeoEvent sourceGeoEvent, GeoEventDefinition edOut, Object v, int fieldCount, int childId) throws MessagingException
   {
-    Object[] result = new Object[count];
+    Object[] result = new Object[fieldCount+1];
     if (v instanceof FieldGroup)
     {
-      for(int index = 0; index < count; index++)
+      for(int index = 0; index < fieldCount; index++)
       {
           result[index] = ((FieldGroup)v).getField(index);
-      }      
+      }
+      result[fieldCount] = childId;
     }
     else
     {
-      result[0] = v;             
+      result[0] = v;
+      result[1] = childId;
     }
     
     Object[] allFieldValues = sourceGeoEvent.getAllFields();            
@@ -197,10 +204,10 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
       valueList.add(o);
     }
 
-    createGeoEventAndSend(sourceGeoEvent, edOut, result, valueList);
+    createGeoEventAndSend(sourceGeoEvent, edOut, result, valueList, childId);
   }
 
-  private void createGeoEventAndSend(GeoEvent sourceGeoEvent, GeoEventDefinition edOut, Object[] result, List<Object> valueList) throws MessagingException
+  private void createGeoEventAndSend(GeoEvent sourceGeoEvent, GeoEventDefinition edOut, Object[] result, List<Object> valueList, int childId) throws MessagingException
   {
     GeoEvent geoEventOut = geoEventCreator.create(edOut.getGuid(), new Object[] { valueList.toArray(), result });
     geoEventOut.setProperty(GeoEventPropertyName.TYPE, "event");
@@ -217,21 +224,24 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   }
 
   
+  @SuppressWarnings("unused")
   synchronized private GeoEventDefinition lookup(GeoEventDefinition edIn) throws Exception
   {
     GeoEventDefinition edOut = edMapper.containsKey(edIn.getGuid()) ? geoEventDefinitionManager.getGeoEventDefinition(edMapper.get(edIn.getGuid())) : null;
     if (edOut == null)
     {
       List<FieldDefinition> fds = fieldDefinitionToSplit.getChildren();
+      FieldDefinition childFd = new DefaultFieldDefinition("childIndex", FieldType.Integer);
+      
       if (fds != null)
       {
-        edOut = edIn.augment(fds).reduce(Arrays.asList(fieldDefinitionToSplit.getName()));        
+        edOut = edIn.augment(fds).reduce(Arrays.asList(fieldDefinitionToSplit.getName())).augment(Arrays.asList(childFd));        
       }
       else
       {
         FieldDefinition fd = (FieldDefinition) fieldDefinitionToSplit.clone();
         fd.setCardinality(FieldCardinality.One);
-        edOut = edIn.reduce(Arrays.asList(fieldDefinitionToSplit.getName())).augment(Arrays.asList(fd));        
+        edOut = edIn.reduce(Arrays.asList(fieldDefinitionToSplit.getName())).augment(Arrays.asList(fd)).augment(Arrays.asList(childFd));        
       }
       edOut.setName(geoEventDefinitionName);
       edOut.setOwner(getId());
