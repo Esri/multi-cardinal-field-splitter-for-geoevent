@@ -33,7 +33,7 @@ public class MulticardinalFieldSplitterDefinition extends GeoEventProcessorDefin
   @Override
   public String getDomain()
   {
-    return "com.esri.ges.processor";
+    return "com.esri.geoevent.processor";
   }
 
   @Override
