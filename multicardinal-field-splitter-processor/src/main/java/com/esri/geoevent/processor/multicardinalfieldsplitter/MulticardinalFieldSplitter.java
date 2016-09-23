@@ -192,16 +192,22 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
       result[0] = v;
       result[1] = childId;
     }
-    
+        
+    int fieldToSplitIndex = sourceGeoEvent.getGeoEventDefinition().getIndexOf(fieldToSplit);    
     Object[] allFieldValues = sourceGeoEvent.getAllFields();            
     List<Object> valueList = new ArrayList<Object>();
+    int index = 0;
     for (Object o : allFieldValues)
     {
-      if (o instanceof ArrayList)
+      //if (o.getClass().toString().contains("Arrays$ArrayList"))
+      //if (o instanceof ArrayList) not working!!!!!
+      if (index == fieldToSplitIndex)
       {
+        index++;
         continue;
       }
       valueList.add(o);
+      index++;
     }
 
     createGeoEventAndSend(sourceGeoEvent, edOut, result, valueList, childId);
