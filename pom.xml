@@ -4,7 +4,7 @@
 
 	<groupId>com.esri.geoevent.parent</groupId>
 	<artifactId>multicardinal-field-splitter</artifactId>
-	<version>10.4.0</version>
+	<version>10.5.0</version>
 	<packaging>pom</packaging>
 
 	<name>Esri :: GeoEvent :: MulticardinalFieldSplitter</name>
@@ -20,25 +20,6 @@
 	<modules>
 		<module>multicardinal-field-splitter-processor</module>
 	</modules>
-	<!--  <repositories>
-		<repository>
-			<id>ages-sdk-repo</id>
-			<url>file://I:/GeoEvent/sdk/geoevent-sdk-10.3.0.4321/repository</url>
-		</repository>
-	</repositories>-->
-<repositories>
-		<repository>
-			<id>ages-sdk-repo</id>
-			<name>GeoEvent Processor SDK repository</name>
-			<url>file:///Program Files/ArcGIS/Server/GeoEvent/sdk/repository</url>
-		</repository>
-		<repository>
-			<id>GEP</id>
-			<name>GeoEvent Processor embedded repository</name>
-			<layout>default</layout>
-			<url>file:///Program Files/ArcGIS/Server/GeoEvent/System</url>
-		</repository>
-	</repositories>
 	<dependencyManagement>
 		<dependencies>
 			<dependency>
@@ -53,7 +34,8 @@
 		<dependency>
 			<groupId>com.esri.geoevent.sdk</groupId>
 			<artifactId>geoevent-sdk</artifactId>
-			<version>10.4.0</version>
+			<version>${project.version}</version>
+			<scope>provided</scope>
 		</dependency>
 	 
 		<!-- 
