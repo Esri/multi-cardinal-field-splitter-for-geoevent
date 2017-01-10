@@ -1,12 +1,13 @@
 package com.esri.geoevent.processor.multicardinalfieldsplitter;
 
-import java.io.Console;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Observable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -16,11 +17,8 @@ import org.osgi.util.tracker.ServiceTrackerCustomizer;
 
 import com.esri.ges.core.component.ComponentException;
 import com.esri.ges.core.geoevent.DefaultFieldDefinition;
-import com.esri.ges.core.geoevent.Field;
 import com.esri.ges.core.geoevent.FieldCardinality;
 import com.esri.ges.core.geoevent.FieldDefinition;
-import com.esri.ges.core.geoevent.FieldException;
-import com.esri.ges.core.geoevent.FieldExpression;
 import com.esri.ges.core.geoevent.FieldGroup;
 import com.esri.ges.core.geoevent.FieldType;
 import com.esri.ges.core.geoevent.GeoEvent;
@@ -54,6 +52,7 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   final Object                                 lock1        = new Object();
 
   private String geoEventDefinitionName;
+  private ExecutorService                      executor;
 
   protected MulticardinalFieldSplitter(GeoEventProcessorDefinition definition) throws ComponentException
   {
@@ -68,6 +67,8 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   {
     fieldToSplit = getProperty("fieldToSplit").getValueAsString();
     geoEventDefinitionName = getProperty("newGeoEventDefinitionName").getValueAsString().trim();
+    
+    executor = Executors.newFixedThreadPool(10);    
   }
 
   @Override
@@ -81,8 +82,9 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   @Override
   public GeoEvent process(GeoEvent geoEvent) throws Exception
   {
-    fieldCardinalSplit(geoEvent);
-
+    GeoEventSplitter splitter = new GeoEventSplitter(geoEvent);
+    executor.execute(splitter);
+    
     return null;
   }
   
@@ -141,9 +143,10 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
         if (fieldDefinitionToSplit.getType() == FieldType.Group) 
         {
           List<FieldGroup> fieldgroups = sourceGeoEvent.getFieldGroups(fieldToSplit);
-          if (fieldgroups == null)
+          if (fieldgroups == null || fieldgroups.size() == 0)
           {
-            return;
+            List<FieldDefinition> fds = fdToSplit.getChildren();
+            appendFieldValuesAndSend(sourceGeoEvent, edOut, null, fds.size(), -1);
           }
           int childId = 0;
           for (FieldGroup fg : fieldgroups)
@@ -158,7 +161,8 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
           List<Object> fieldValues = (List<Object>)sourceGeoEvent.getField(fieldToSplit);
           if (fieldValues == null)
           {
-            return;
+            List<FieldDefinition> fds = fdToSplit.getChildren();
+            appendFieldValuesAndSend(sourceGeoEvent, edOut, null, fds.size(), -1);
           }
           int childId = 0;
           for (Object fv : fieldValues)
@@ -179,7 +183,7 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   private void appendFieldValuesAndSend(GeoEvent sourceGeoEvent, GeoEventDefinition edOut, Object v, int fieldCount, int childId) throws MessagingException
   {
     Object[] result = new Object[fieldCount+1];
-    if (v instanceof FieldGroup)
+    if (v != null && v instanceof FieldGroup)
     {
       for(int index = 0; index < fieldCount; index++)
       {
@@ -337,4 +341,39 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
       this.geoEventDefinitionManager = null;
     }
   }
+  
+  @Override
+  public void shutdown()
+  {
+    if (executor != null)
+    {
+      executor.shutdown();
+      while (!executor.isTerminated()) {
+      }
+      executor = null;
+    }
+  }
+ 
+  class GeoEventSplitter implements Runnable
+  {
+    private GeoEvent sourceGeoEvent;
+    
+    public GeoEventSplitter(GeoEvent sourceGeoEvent)
+    {
+      this.sourceGeoEvent = sourceGeoEvent;
+    }
+
+    @Override
+    public void run()
+    {
+      try
+      {
+        fieldCardinalSplit(sourceGeoEvent);
+      }
+      catch (MessagingException e)
+      {
+        log.error("fieldCardinalSplit failed. " + e.getMessage());
+      }      
+    }
+  }  
 }
