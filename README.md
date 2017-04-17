@@ -1,6 +1,6 @@
-# multicardinal-field-splitter-for-geoevent
+# multi-cardinal-field-splitter-for-geoevent
 
-ArcGIS GeoEvent Extension Multicardinal Field Splitter Processor for splitting a field into individual GeoEvents.
+ArcGIS GeoEvent Server Sample Multicardinal Field Splitter Processor for splitting a field into individual GeoEvents.
 
 ![App](multicardinal-field-splitter-for-geoevent.gif?raw=true)
 
@@ -55,7 +55,3 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 A copy of the license is available in the repository's [license.txt](license.txt?raw=true) file.
-
-[](ArcGIS, GeoEvent, Processor)
-[](Esri Tags: ArcGIS GeoEvent Processor for Server)
-[](Esri Language: Java)
