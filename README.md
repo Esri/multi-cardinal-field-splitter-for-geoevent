@@ -1,4 +1,4 @@
-# multicardinal-field-splitter-for-geoevent
+# multi-cardinal-field-splitter-for-geoevent
 
 ArcGIS GeoEvent Server Sample Multicardinal Field Splitter Processor for splitting a field into individual GeoEvents.
 
