@@ -67,7 +67,11 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   {
     fieldToSplit = getProperty("fieldToSplit").getValueAsString();
     geoEventDefinitionName = getProperty("newGeoEventDefinitionName").getValueAsString().trim();
-    
+    if (geoEventDefinitionName.isEmpty())
+      geoEventMutator = true;
+    else
+      geoEventMutator = false;
+   
     executor = Executors.newFixedThreadPool(10);    
   }
 
@@ -253,9 +257,16 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
         fd.setCardinality(FieldCardinality.One);
         edOut = edIn.reduce(Arrays.asList(fieldDefinitionToSplit.getName())).augment(Arrays.asList(fd)).augment(Arrays.asList(childFd));        
       }
-      edOut.setName(geoEventDefinitionName);
       edOut.setOwner(getId());
-      geoEventDefinitionManager.addTemporaryGeoEventDefinition(edOut, geoEventDefinitionName.isEmpty());
+      if (!geoEventDefinitionName.isEmpty())
+      {
+        edOut.setName(geoEventDefinitionName);
+        geoEventDefinitionManager.addTemporaryGeoEventDefinition(edOut, false);
+      }
+      else
+      {
+        geoEventDefinitionManager.addTemporaryGeoEventDefinition(edOut, true);
+      }
       edMapper.put(edIn.getGuid(), edOut.getGuid());
     }
     return edOut;
@@ -345,6 +356,9 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   @Override
   public void shutdown()
   {
+    super.shutdown();
+    clearGeoEventDefinitionMapper();
+    
     if (executor != null)
     {
       executor.shutdown();
