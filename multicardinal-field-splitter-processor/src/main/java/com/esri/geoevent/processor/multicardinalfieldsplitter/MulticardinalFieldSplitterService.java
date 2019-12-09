@@ -34,7 +34,7 @@ import com.esri.ges.processor.GeoEventProcessorServiceBase;
 
 public class MulticardinalFieldSplitterService extends GeoEventProcessorServiceBase
 {
-  private Messaging messaging;
+  private Messaging        messaging;
   final private static Log LOG = LogFactory.getLog(MulticardinalFieldSplitterService.class);
 
   public MulticardinalFieldSplitterService()
