@@ -13,7 +13,7 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.bundle.plugin.version>4.0.0</maven.bundle.plugin.version>
     <junit.version>4.8.1</junit.version>
-    <project.release>6</project.release>
+    <project.release>8</project.release>
   </properties>
   <modules>
     <module>multicardinal-field-splitter-processor</module>

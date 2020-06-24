@@ -69,7 +69,7 @@ public class MulticardinalFieldSplitterDefinition extends GeoEventProcessorDefin
   @Override
   public String getDescription()
   {
-    return "Release 6: Split multi-cardinal group fields into individual GeoEvents. For fields of type 'Group' that have cardinality set a 'Many', this processor will create a copy of the incoming event for each child of the specified group field. The attributes of each child will be promoted up one level. All other attributes of the original event will be preserved. Any promoted field whose name collides with an existing name, will be modified to include '__#' at the end (where # will be a unique number).";
+    return "Release 8: Split multi-cardinal group fields into individual GeoEvents. For fields of type 'Group' that have cardinality set a 'Many', this processor will create a copy of the incoming event for each child of the specified group field. The attributes of each child will be promoted up one level. All other attributes of the original event will be preserved. Any promoted field whose name collides with an existing name, will be modified to include the parent field name as a prefix and possibly '__#' at the end (where # will be a unique number).";
   }
 
   @Override

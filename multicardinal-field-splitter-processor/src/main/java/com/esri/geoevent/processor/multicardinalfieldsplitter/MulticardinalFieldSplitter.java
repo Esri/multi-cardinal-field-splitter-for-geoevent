@@ -91,8 +91,16 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
 
   public void afterPropertiesSet()
   {
+    if (log.isTraceEnabled())
+    {
+      getProperties().forEach(prop ->
+        {
+          log.trace(prop.toString());
+        });
+    }
     fieldToSplit = getProperty("fieldToSplit").getValueAsString();
-    geoEventDefinitionName = getProperty("newGeoEventDefinitionName").getValueAsString().trim();
+    geoEventDefinitionName = getProperty("newGeoEventDefinitionName").getValueAsString();
+    log.trace("Field to split is {0} and new defintion name is {1} and isMutator = {2}", fieldToSplit, geoEventDefinitionName, geoEventMutator);
     if (geoEventDefinitionName.isEmpty())
       geoEventMutator = true;
     else
@@ -166,29 +174,46 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
       try
       {
         GeoEventDefinition ed = sourceGeoEvent.getGeoEventDefinition();
+        log.trace("Splitting incoming definition {0}", ed);
         FieldDefinition fdToSplit = ed.getFieldDefinition(fieldToSplit);
         fieldDefinitionToSplit = fdToSplit;
+        log.trace("Splitting field named {0} with definition {1}", fieldToSplit, fdToSplit);
 
         GeoEventDefinition edOut = lookup(sourceGeoEvent.getGeoEventDefinition());
         if (Thread.interrupted())
           return;
         if (fieldDefinitionToSplit.getType() == FieldType.Group)
         {
+          int childId = 0;
           log.trace("Field definition to split is a group");
-          List<FieldGroup> fieldgroups = sourceGeoEvent.getFieldGroups(fieldToSplit);
-          if (fieldgroups == null || fieldgroups.size() == 0)
+          List<FieldGroup> fieldgroups = null;
+          FieldGroup fieldgroup = null;
+          try
+          {
+            fieldgroups = sourceGeoEvent.getFieldGroups(fieldToSplit);
+          }
+          catch (Exception e)
+          {
+            log.trace("Field definition to split is not a multicardinal field group. Trying to get it as a single field group: ", e);
+            fieldgroup = sourceGeoEvent.getFieldGroup(fieldToSplit);
+          }
+
+          if (fieldgroups == null && fieldgroup != null)
+          {
+            childId = sendFieldGroupMember(sourceGeoEvent, fdToSplit, edOut, childId, fieldgroup);
+          }
+          else if (fieldgroups == null || fieldgroups.size() == 0)
           {
             log.trace("Child field groups is null or size 0.");
             List<FieldDefinition> fds = fdToSplit.getChildren();
             appendFieldValuesAndSend(sourceGeoEvent, edOut, null, fds.size(), -1);
           }
-          int childId = 0;
+          else
+          {
           for (FieldGroup fg : fieldgroups)
           {
-            log.trace("Sending field group member {0}: {1}", childId, fg);
-            List<FieldDefinition> fds = fdToSplit.getChildren();
-            appendFieldValuesAndSend(sourceGeoEvent, edOut, fg, fds.size(), childId);
-            childId++;
+              childId = sendFieldGroupMember(sourceGeoEvent, fdToSplit, edOut, childId, fg);
+            }
           }
         }
         else
@@ -215,6 +240,15 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
         log.error("Field Cardinal Split failed. ", e);
       }
     }
+  }
+
+  private int sendFieldGroupMember(GeoEvent sourceGeoEvent, FieldDefinition fdToSplit, GeoEventDefinition edOut, int childId, FieldGroup fg) throws MessagingException
+  {
+    log.trace("Sending field group member {0}: {1}", childId, fg);
+    List<FieldDefinition> fds = fdToSplit.getChildren();
+    appendFieldValuesAndSend(sourceGeoEvent, edOut, fg, fds.size(), childId);
+    childId++;
+    return childId;
   }
 
   private void appendFieldValuesAndSend(GeoEvent sourceGeoEvent, GeoEventDefinition edOut, Object v, int fieldCount, int childId) throws MessagingException
@@ -275,14 +309,30 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
     GeoEventDefinition edOut = edMapper.containsKey(edIn.getGuid()) ? geoEventDefinitionManager.getGeoEventDefinition(edMapper.get(edIn.getGuid())) : null;
     if (edOut == null)
     {
-      List<FieldDefinition> fds = fieldDefinitionToSplit.getChildren();
 
-      String newIndexFieldName = getUniqueFieldName(edIn, INDEX_FIELD_NAME);
+      final List<FieldDefinition> fds = new ArrayList<FieldDefinition>();
+      fieldDefinitionToSplit.getChildren().forEach(childFieldDef ->
+        {
+          try
+          {
+            fds.add((FieldDefinition) childFieldDef.clone());
+          }
+          catch (CloneNotSupportedException e)
+          {
+            log.info("Failed to clone group child field definition: {0}", childFieldDef != null ? childFieldDef.getName() : "NULL");
+          }
+        });
+      ;
+
+      String newIndexFieldName = getUniqueFieldName(edIn, fieldToSplit + "_", INDEX_FIELD_NAME, true);
       FieldDefinition childFd = new DefaultFieldDefinition(newIndexFieldName, FieldType.Integer);
 
-      if (fds != null)
+      if (fds != null && fds.size() > 0)
       {
         log.trace("Augmenting definition to reduce split field and add splitfield childeren");
+        updateChildFieldNames(edIn, fds);
+
+        // remove the split field, add the child fields, add the child index field
         edOut = edIn.reduce(Arrays.asList(fieldDefinitionToSplit.getName())).augment(fds).augment(Arrays.asList(childFd));
       }
       else
@@ -307,19 +357,45 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
     return edOut;
   }
 
-  private String getUniqueFieldName(GeoEventDefinition edIn, String baseName)
+  private List<FieldDefinition> updateChildFieldNames(GeoEventDefinition edIn, List<FieldDefinition> childFieldDefs)
   {
-    int newIndexFieldNameIndex = 0;
-    String newIndexFieldName = baseName + "__" + newIndexFieldNameIndex;
-
     try
     {
-      FieldDefinition isExisting = edIn.getFieldDefinition(newIndexFieldName);
+      for (FieldDefinition childFieldDef : childFieldDefs)
+  {
+        childFieldDef.setName(getUniqueFieldName(edIn, fieldToSplit + "_", childFieldDef.getName(), false));
+      }
+    }
+    catch (Exception e)
+    {
+      log.debug("Failed to set unique names on promoted child field group: {0}", e, childFieldDefs);
+    }
+
+    return childFieldDefs;
+  }
+
+  private String getUniqueFieldName(GeoEventDefinition edIn, String prefix, String baseName, boolean alwaysUsePrefix)
+  {
+    int newIndexFieldNameIndex = -1;
+    String newIndexFieldName = baseName;
+    if (prefix != null && alwaysUsePrefix)
+      newIndexFieldName = prefix + baseName;
+
+    log.trace("Making sure field name is unique: {0}", newIndexFieldName);
+    try
+    {
+      FieldDefinition isExisting = findFieldNameIgnoreCase(edIn, newIndexFieldName);
       while (isExisting != null && newIndexFieldNameIndex < 100)
       {
+        log.trace("Found a matching name, incrementing index on {0}: {1}", newIndexFieldName, newIndexFieldNameIndex);
         ++newIndexFieldNameIndex;
-        newIndexFieldName = baseName + "__" + newIndexFieldNameIndex;
-        isExisting = edIn.getFieldDefinition(newIndexFieldName);
+
+        newIndexFieldName = prefix + baseName;
+        if (newIndexFieldNameIndex >= 1)
+          newIndexFieldName = prefix + baseName + "__" + newIndexFieldNameIndex;
+        isExisting = findFieldNameIgnoreCase(edIn, newIndexFieldName);
+        if (isExisting == null && newIndexFieldNameIndex >= 100)
+          log.debug("Error adding new field, tried 100 times. giving up on {0}", newIndexFieldName);
       }
     }
     catch (Exception e)
@@ -327,6 +403,21 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
       log.debug("Failed to determine unque index field name", e);
     }
     return newIndexFieldName;
+  }
+
+  private FieldDefinition findFieldNameIgnoreCase(GeoEventDefinition geoeventDefinition, String name)
+  {
+    FieldDefinition result = null;
+    if (name != null)
+    {
+      for (FieldDefinition field : geoeventDefinition.getFieldDefinitions())
+      {
+        result = name.equalsIgnoreCase(field.getName()) ? field : null;
+        if (result != null)
+          break;
+      }
+    }
+    return result;
   }
 
   @Override
