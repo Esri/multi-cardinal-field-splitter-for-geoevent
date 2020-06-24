@@ -39,19 +39,13 @@ public class MulticardinalFieldSplitterDefinition extends GeoEventProcessorDefin
   {
     try
     {
-      propertyDefinitions.put("fieldToSplit", new PropertyDefinition("fieldToSplit", PropertyType.String, "MyField", "Field to Split", "Field name its children to be split into individual GeoEvents", false, false));
-      propertyDefinitions.put("newGeoEventDefinitionName", new PropertyDefinition("newGeoEventDefinitionName", PropertyType.String, "FieldgroupSplitter", "Resulting GeoEvent Definition Name", "FieldSplitter", false, false));
+      propertyDefinitions.put("fieldToSplit", new PropertyDefinition("fieldToSplit", PropertyType.String, "MyField", "Field to Split", "The name of a group field to have its children to be split into individual GeoEvents. One event will be created for each child of this group field. The group field will be removed from the resulting GeoEvent Definition, and child fields will be promoted.", true, false));
+      propertyDefinitions.put("newGeoEventDefinitionName", new PropertyDefinition("newGeoEventDefinitionName", PropertyType.String, "FieldgroupSplitter", "New GeoEvent Definition Name", "The name of the new GeoEvent Definition that will be created.", true, false));
     }
     catch (Exception e)
     {
       LOG.error("Error setting up Multicardinal Field Splitter Definition.", e);
     }
-  }
-
-  @Override
-  public String getVersion()
-  {
-    return "10.6.0";
   }
 
   @Override
@@ -75,13 +69,13 @@ public class MulticardinalFieldSplitterDefinition extends GeoEventProcessorDefin
   @Override
   public String getDescription()
   {
-    return "Split multi cardinality field into individual GeoEvents";
+    return "Release 8: Split multi-cardinal group fields into individual GeoEvents. For fields of type 'Group' that have cardinality set a 'Many', this processor will create a copy of the incoming event for each child of the specified group field. The attributes of each child will be promoted up one level. All other attributes of the original event will be preserved. Any promoted field whose name collides with an existing name, will be modified to include the parent field name as a prefix and possibly '__#' at the end (where # will be a unique number).";
   }
 
   @Override
   public String getContactInfo()
   {
-    return "mpilouk@esri.com";
+    return "geoevent@esri.com";
   }
 
 }
