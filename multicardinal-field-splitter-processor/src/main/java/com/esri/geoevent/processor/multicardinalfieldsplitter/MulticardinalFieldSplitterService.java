@@ -24,10 +24,9 @@
 
 package com.esri.geoevent.processor.multicardinalfieldsplitter;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-
 import com.esri.ges.core.component.ComponentException;
+import com.esri.ges.framework.i18n.BundleLogger;
+import com.esri.ges.framework.i18n.BundleLoggerFactory;
 import com.esri.ges.messaging.Messaging;
 import com.esri.ges.processor.GeoEventProcessor;
 import com.esri.ges.processor.GeoEventProcessorServiceBase;
@@ -35,7 +34,7 @@ import com.esri.ges.processor.GeoEventProcessorServiceBase;
 public class MulticardinalFieldSplitterService extends GeoEventProcessorServiceBase
 {
   private Messaging        messaging;
-  final private static Log LOG = LogFactory.getLog(MulticardinalFieldSplitterService.class);
+  private static final BundleLogger LOG = BundleLoggerFactory.getLogger(MulticardinalFieldSplitter.class);
 
   public MulticardinalFieldSplitterService()
   {

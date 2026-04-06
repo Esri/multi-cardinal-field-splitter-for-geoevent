@@ -4,33 +4,51 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.esri.geoevent.parent</groupId>
   <artifactId>multicardinal-field-splitter</artifactId>
-  <version>10.4.0</version>
+  <version>${revision}</version>
   <packaging>pom</packaging>
   <name>Esri :: GeoEvent :: MulticardinalFieldSplitter</name>
-  <url>http://www.esri.com</url>
+  <url>https://www.arcgis.com/home/item.html?id=${gallery.itemId}</url>
+  <organization>
+    <name>Esri, inc</name>
+    <url>https://www.esri.com</url>
+  </organization>
   <properties>
+    <revision>10.9.0</revision>
+    <release.name>Multicardinal Field Splitter Processor</release.name>
     <contact.address>geoevent@esri.com</contact.address>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <maven.bundle.plugin.version>4.0.0</maven.bundle.plugin.version>
-    <junit.version>4.8.1</junit.version>
-    <project.release>8</project.release>
+    <project.build.propertiesEncoding>ISO-8859-1</project.build.propertiesEncoding>
+    <maven.bundle.plugin.version>6.0.2</maven.bundle.plugin.version>
+    <maven.bundle.plugin.version>6.0.2</maven.bundle.plugin.version>
+    <maven.resources.plugin.version>3.5.0</maven.resources.plugin.version>
+    <maven.compiler.plugin.version>3.15.0</maven.compiler.plugin.version>
+    <org.osgi.version>1.5.2</org.osgi.version>
+    <junit.jupiter.version>6.0.3</junit.jupiter.version>
+    
+    <project.release>9</project.release>
+    <build.time>${maven.build.timestamp}</build.time>
+    <gallery.itemId>68238a93e5fd4043ad0bbb501b265566</gallery.itemId>
+    <release.itemId></release.itemId>
+    <compatibility.min>${project.version}</compatibility.min>
+    <compatibility.max></compatibility.max>
   </properties>
   <modules>
     <module>multicardinal-field-splitter-processor</module>
   </modules>
-  <dependencies>
-    <dependency>
-      <groupId>com.esri.geoevent.sdk</groupId>
-      <artifactId>geoevent-sdk</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>junit</groupId>
-      <artifactId>junit</artifactId>
-      <version>${junit.version}</version>
-      <scope>test</scope>
-    </dependency>
-  </dependencies>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.esri.geoevent.sdk</groupId>
+        <artifactId>geoevent-sdk</artifactId>
+        <version>${revision}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.osgi</groupId>
+        <artifactId>org.osgi.util.tracker</artifactId>
+        <version>${org.osgi.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
   <build>
     <resources>
       <resource>
@@ -41,18 +59,44 @@
     <pluginManagement>
       <plugins>
         <plugin>
-          <groupId>org.apache.felix</groupId>
-          <artifactId>maven-bundle-plugin</artifactId>
-          <extensions>true</extensions>
-          <version>${maven.bundle.plugin.version}</version>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-resources-plugin</artifactId>
+            <version>${maven.resources.plugin.version}</version>
+            <configuration>
+                <propertiesEncoding>${project.build.propertiesEncoding}</propertiesEncoding>
+            </configuration>
         </plugin>
         <plugin>
-          <groupId>org.apache.maven.plugins</groupId>
-          <artifactId>maven-compiler-plugin</artifactId>
-          <configuration>
-            <source>1.8</source>
-            <target>1.8</target>
-          </configuration>
+            <groupId>org.apache.felix</groupId>
+            <artifactId>maven-bundle-plugin</artifactId>
+            <version>${maven.bundle.plugin.version}</version>
+            <extensions>true</extensions>
+            <configuration>
+                <finalName>${project.artifactId}-${revision}</finalName>
+                <instructions>
+                    <AGES-Domain>${project.groupId}</AGES-Domain>
+                    <Bundle-ContactAddress>${contact.address}</Bundle-ContactAddress>
+                    <Export-Package />
+                </instructions>
+            </configuration>
+        </plugin>
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-install-plugin</artifactId>
+            <version>3.1.4</version>
+        </plugin>
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-deploy-plugin</artifactId>
+            <version>3.1.4</version>
+        </plugin>
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-compiler-plugin</artifactId>
+            <version>${maven.compiler.plugin.version}</version>
+            <configuration>
+                <release>${project.release}</release>
+            </configuration>
         </plugin>
       </plugins>
     </pluginManagement>

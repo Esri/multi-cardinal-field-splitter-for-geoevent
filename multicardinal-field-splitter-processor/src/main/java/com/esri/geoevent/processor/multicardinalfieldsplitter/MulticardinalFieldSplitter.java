@@ -66,7 +66,7 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   private static final BundleLogger log              = BundleLoggerFactory.getLogger(MulticardinalFieldSplitter.class);
   private static final String       INDEX_FIELD_NAME = "childIndex";
 
-  private Map<String, String>       edMapper         = new ConcurrentHashMap<String, String>();
+  private final Map<String, String>       edMapper         = new ConcurrentHashMap<>();
   private ServiceTracker<?, ?>      geoEventDefinitionManagerTracker;
   private GeoEventDefinitionManager geoEventDefinitionManager;
   private Messaging                 messaging;
@@ -75,8 +75,6 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   private String                    fieldToSplit;
   private FieldDefinition           fieldDefinitionToSplit;
 
-  final Object                      lock1            = new Object();
-
   private String                    geoEventDefinitionName;
   private ExecutorService           executor;
 
@@ -84,11 +82,12 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   {
     super(definition);
     if (geoEventDefinitionManagerTracker == null)
-      geoEventDefinitionManagerTracker = new ServiceTracker<Object, Object>(definition.getBundleContext(), GeoEventDefinitionManager.class.getName(), this);
+      geoEventDefinitionManagerTracker = new ServiceTracker<>(definition.getBundleContext(), GeoEventDefinitionManager.class.getName(), this);
     geoEventDefinitionManagerTracker.open();
     log.trace("Event Splitter instantiated.");
   }
 
+  @Override
   public void afterPropertiesSet()
   {
     if (log.isTraceEnabled())
@@ -100,11 +99,8 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
     }
     fieldToSplit = getProperty("fieldToSplit").getValueAsString();
     geoEventDefinitionName = getProperty("newGeoEventDefinitionName").getValueAsString();
+    geoEventMutator = geoEventDefinitionName.isEmpty();
     log.trace("Field to split is {0} and new defintion name is {1} and isMutator = {2}", fieldToSplit, geoEventDefinitionName, geoEventMutator);
-    if (geoEventDefinitionName.isEmpty())
-      geoEventMutator = true;
-    else
-      geoEventMutator = false;
   }
 
   @Override
@@ -117,28 +113,29 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   @Override
   public GeoEvent process(GeoEvent geoEvent) throws Exception
   {
-    GeoEventSplitter splitter = new GeoEventSplitter(geoEvent);
-    if (executor == null || executor.isShutdown() || executor.isTerminated())
-      executor = Executors.newCachedThreadPool();
-    executor.execute(splitter);
-
+    if(geoEvent != null){
+      GeoEventSplitter splitter = new GeoEventSplitter(geoEvent);
+      if (executor == null || executor.isShutdown() || executor.isTerminated())
+        executor = Executors.newCachedThreadPool();
+      executor.execute(splitter);
+    }
     return null;
   }
 
   @Override
   public List<EventDestination> getEventDestinations()
   {
-    return (geoEventProducer != null) ? Arrays.asList(geoEventProducer.getEventDestination()) : new ArrayList<EventDestination>();
+    return (geoEventProducer != null) ? Arrays.asList(geoEventProducer.getEventDestination()) : new ArrayList<>();
   }
 
   @Override
   public void validate() throws ValidationException
   {
     super.validate();
-    List<String> errors = new ArrayList<String>();
-    if (errors.size() > 0)
+    List<String> errors = new ArrayList<>();
+    if (!errors.isEmpty())
     {
-      StringBuffer sb = new StringBuffer();
+      StringBuilder sb = new StringBuilder();
       for (String message : errors)
         sb.append(message).append("\n");
       throw new ValidationException(this.getClass().getName() + " validation failed: " + sb.toString());
@@ -202,7 +199,7 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
           {
             childId = sendFieldGroupMember(sourceGeoEvent, fdToSplit, edOut, childId, fieldgroup);
           }
-          else if (fieldgroups == null || fieldgroups.size() == 0)
+          else if (fieldgroups == null || fieldgroups.isEmpty())
           {
             log.trace("Child field groups is null or size 0.");
             List<FieldDefinition> fds = fdToSplit.getChildren();
@@ -226,12 +223,14 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
             List<FieldDefinition> fds = fdToSplit.getChildren();
             appendFieldValuesAndSend(sourceGeoEvent, edOut, null, fds.size(), -1);
           }
-          int childId = 0;
-          for (Object fv : fieldValues)
-          {
-            log.trace("Sending field value member {0}: {1}", childId, fv);
-            appendFieldValuesAndSend(sourceGeoEvent, edOut, fv, 1, childId);
-            childId++;
+          if(fieldValues != null && !fieldValues.isEmpty()){
+            int childId = 0;
+            for (Object fv : fieldValues)
+            {
+              log.trace("Sending field value member {0}: {1}", childId, fv);
+              appendFieldValuesAndSend(sourceGeoEvent, edOut, fv, 1, childId);
+              childId++;
+            }
           }
         }
       }
@@ -270,7 +269,7 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
 
     int fieldToSplitIndex = sourceGeoEvent.getGeoEventDefinition().getIndexOf(fieldToSplit);
     Object[] allFieldValues = sourceGeoEvent.getAllFields();
-    List<Object> valueList = new ArrayList<Object>();
+    List<Object> valueList = new ArrayList<>();
     int index = 0;
     for (Object o : allFieldValues)
     {
@@ -310,7 +309,7 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
     if (edOut == null)
     {
 
-      final List<FieldDefinition> fds = new ArrayList<FieldDefinition>();
+      final List<FieldDefinition> fds = new ArrayList<>();
       fieldDefinitionToSplit.getChildren().forEach(childFieldDef ->
         {
           try
@@ -327,7 +326,7 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
       String newIndexFieldName = getUniqueFieldName(edIn, fieldToSplit + "_", INDEX_FIELD_NAME, true);
       FieldDefinition childFd = new DefaultFieldDefinition(newIndexFieldName, FieldType.Integer);
 
-      if (fds != null && fds.size() > 0)
+      if (!fds.isEmpty())
       {
         log.trace("Augmenting definition to reduce split field and add splitfield childeren");
         updateChildFieldNames(edIn, fds);
@@ -436,7 +435,7 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   @Override
   public void init() throws MessagingException
   {
-    ;
+    // no-op, waiting for first event to create producer
   }
 
   @Override
@@ -448,13 +447,14 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   @Override
   public void setup() throws MessagingException
   {
-    ;
+    // no-op, waiting for first event to create producer
   }
 
+  @SuppressWarnings("deprecation") // Observable is required by the GeoEvent SDK; not under our control
   @Override
   public void update(Observable o, Object arg)
   {
-    ;
+    // no-op, waiting for first event to create producer
   }
 
   synchronized private void clearGeoEventDefinitionMapper()
@@ -469,7 +469,7 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
         }
         catch (GeoEventDefinitionManagerException e)
         {
-          ;
+          // pass, just trying to clean up temporary definitions that may have been added
         }
       }
       edMapper.clear();
@@ -488,7 +488,7 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   @Override
   public void modifiedService(ServiceReference<Object> reference, Object service)
   {
-    ;
+    // no-op
   }
 
   @Override
@@ -510,6 +510,7 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
     executor = null;
     new Thread()
       {
+        @Override
         public void run()
         {
           if (localExec != null)
@@ -529,7 +530,7 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
 
   class GeoEventSplitter implements Runnable
   {
-    private GeoEvent sourceGeoEvent;
+    private final GeoEvent sourceGeoEvent;
 
     public GeoEventSplitter(GeoEvent sourceGeoEvent)
     {

@@ -5,7 +5,7 @@
   <parent>
     <groupId>com.esri.geoevent.parent</groupId>
     <artifactId>multicardinal-field-splitter</artifactId>
-    <version>10.4.0</version>
+    <version>${revision}</version>
   </parent>
   <groupId>com.esri.geoevent.processor</groupId>
   <artifactId>multicardinal-field-splitter-processor</artifactId>
@@ -13,25 +13,31 @@
   <packaging>bundle</packaging>
   <dependencies>
     <dependency>
+        <groupId>com.esri.geoevent.sdk</groupId>
+        <artifactId>geoevent-sdk</artifactId>
+    </dependency>
+    <dependency>
       <groupId>org.osgi</groupId>
       <artifactId>org.osgi.util.tracker</artifactId>
-      <version>1.5.2</version>
     </dependency>
   </dependencies>
   <build>
     <plugins>
       <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-resources-plugin</artifactId>
+      </plugin>
+      <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+      </plugin>
+      <plugin>
         <groupId>org.apache.felix</groupId>
         <artifactId>maven-bundle-plugin</artifactId>
-        <extensions>true</extensions>
         <configuration>
-          <instructions>
-            <Bundle-SymbolicName>${project.groupId}.${project.artifactId}</Bundle-SymbolicName>
-            <Bundle-ContactAddress>${sdk.contact.address}</Bundle-ContactAddress>
-            <Bundle-Version>${project.version}</Bundle-Version>
-            <AGES-Domain>com.esri.geoevent.processor</AGES-Domain>
-            <Export-Package />
-            <Private-Package>com.esri.geoevent.processor.multicardinalfieldsplitter</Private-Package>
+            <instructions>
+                <Bundle-SymbolicName>${project.groupId}.${project.artifactId}</Bundle-SymbolicName>
+                <Private-Package>com.esri.geoevent.processor.multicardinalfieldsplitter</Private-Package>
           </instructions>
         </configuration>
       </plugin>
