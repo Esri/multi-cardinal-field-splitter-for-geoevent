@@ -133,6 +133,12 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   {
     super.validate();
     List<String> errors = new ArrayList<>();
+    if (fieldToSplit == null || fieldToSplit.trim().isEmpty())
+      errors.add("'Field to Split' is required.");
+    if (geoEventDefinitionManager == null)
+      errors.add("GeoEvent Definition Manager is not available.");
+    if (geoEventCreator == null)
+      errors.add("GeoEvent Creator is not available. Messaging may not have been initialized.");
     if (!errors.isEmpty())
     {
       StringBuilder sb = new StringBuilder();
