@@ -208,8 +208,7 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
           else if (fieldgroups == null || fieldgroups.isEmpty())
           {
             log.trace("Child field groups is null or size 0.");
-            List<FieldDefinition> fds = fdToSplit.getChildren();
-            appendFieldValuesAndSend(sourceGeoEvent, edOut, null, fds.size(), -1);
+            appendFieldValuesAndSend(sourceGeoEvent, edOut, null, getSplitFieldOutputFieldCount(fdToSplit), -1);
           }
           else
           {
@@ -226,8 +225,7 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
           if (fieldValues == null || fieldValues.size() <= 0)
           {
             log.trace("Field to split value list is null.");
-            List<FieldDefinition> fds = fdToSplit.getChildren();
-            appendFieldValuesAndSend(sourceGeoEvent, edOut, null, fds.size(), -1);
+            appendFieldValuesAndSend(sourceGeoEvent, edOut, null, getSplitFieldOutputFieldCount(fdToSplit), -1);
           }
           if(fieldValues != null && !fieldValues.isEmpty()){
             int childId = 0;
@@ -250,10 +248,15 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   private int sendFieldGroupMember(GeoEvent sourceGeoEvent, FieldDefinition fdToSplit, GeoEventDefinition edOut, int childId, FieldGroup fg) throws MessagingException
   {
     log.trace("Sending field group member {0}: {1}", childId, fg);
-    List<FieldDefinition> fds = fdToSplit.getChildren();
-    appendFieldValuesAndSend(sourceGeoEvent, edOut, fg, fds.size(), childId);
+    appendFieldValuesAndSend(sourceGeoEvent, edOut, fg, getSplitFieldOutputFieldCount(fdToSplit), childId);
     childId++;
     return childId;
+  }
+
+  private int getSplitFieldOutputFieldCount(FieldDefinition fdToSplit)
+  {
+    List<FieldDefinition> childFieldDefinitions = fdToSplit.getChildren();
+    return childFieldDefinitions == null || childFieldDefinitions.isEmpty() ? 1 : childFieldDefinitions.size();
   }
 
   private void appendFieldValuesAndSend(GeoEvent sourceGeoEvent, GeoEventDefinition edOut, Object v, int fieldCount, int childId) throws MessagingException
@@ -316,7 +319,10 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
     {
 
       final List<FieldDefinition> fds = new ArrayList<>();
-      fieldDefinitionToSplit.getChildren().forEach(childFieldDef ->
+      List<FieldDefinition> childFieldDefinitions = fieldDefinitionToSplit.getChildren();
+      if (childFieldDefinitions != null)
+      {
+        childFieldDefinitions.forEach(childFieldDef ->
         {
           try
           {
@@ -327,7 +333,7 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
             log.info("Failed to clone group child field definition: {0}", childFieldDef != null ? childFieldDef.getName() : "NULL");
           }
         });
-      ;
+      }
 
       String newIndexFieldName = getUniqueFieldName(edIn, fieldToSplit + "_", INDEX_FIELD_NAME, true);
       FieldDefinition childFd = new DefaultFieldDefinition(newIndexFieldName, FieldType.Integer);

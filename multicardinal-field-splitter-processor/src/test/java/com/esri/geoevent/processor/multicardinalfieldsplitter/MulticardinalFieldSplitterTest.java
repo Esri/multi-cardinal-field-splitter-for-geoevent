@@ -505,7 +505,74 @@ class MulticardinalFieldSplitterTest
     verify(mockGeoEventProducer, timeout(2000).times(3)).send(any(GeoEvent.class));
   }
 
+  @Test
+  void processWithNonGroupFieldSplitsListWhenChildrenAreNull() throws Exception
+  {
+    PropertyDefinition pdField = new PropertyDefinition("fieldToSplit", PropertyType.String, "keys", "label", "desc", true, false);
+    processor.setProperty(new Property(pdField, "keys"));
+    processor.afterPropertiesSet();
+    when(mockMessaging.createGeoEventCreator()).thenReturn(mockGeoEventCreator);
+    when(mockMessaging.createGeoEventProducer(any())).thenReturn(mockGeoEventProducer);
+    processor.setMessaging(mockMessaging);
+    processor.setId("test-id");
+    setPrivateField(processor, "geoEventDefinitionManager", mockDefinitionManager);
+
+    GeoEventDefinition mockEdIn = mock(GeoEventDefinition.class);
+    when(mockEdIn.getGuid()).thenReturn("guid-in-null-children");
+
+    FieldDefinition listFieldDef = mock(FieldDefinition.class);
+    FieldDefinition clonedListFieldDef = mock(FieldDefinition.class);
+    when(listFieldDef.getType()).thenReturn(FieldType.String);
+    when(listFieldDef.getName()).thenReturn("keys");
+    when(listFieldDef.getChildren()).thenReturn(null);
+    when(listFieldDef.clone()).thenReturn(clonedListFieldDef);
+
+    when(mockEdIn.getFieldDefinition("keys")).thenReturn(listFieldDef);
+    when(mockEdIn.getIndexOf("keys")).thenReturn(2);
+    when(mockEdIn.getFieldDefinitions()).thenReturn(Collections.emptyList());
+
+    GeoEventDefinition mockEdOut = mock(GeoEventDefinition.class);
+    when(mockEdOut.getGuid()).thenReturn("guid-out-null-children");
+    GeoEventDefinition mockReduced = mock(GeoEventDefinition.class);
+    when(mockEdIn.reduce(anyList())).thenReturn(mockReduced);
+    GeoEventDefinition mockAugmented = mock(GeoEventDefinition.class);
+    when(mockReduced.augment(anyList())).thenReturn(mockAugmented);
+    when(mockAugmented.augment(anyList())).thenReturn(mockEdOut);
+
+    GeoEvent mockSourceEvent = mock(GeoEvent.class);
+    when(mockSourceEvent.getGeoEventDefinition()).thenReturn(mockEdIn);
+    List<Object> fieldValues = Arrays.asList("red", "green", "blue");
+    when(mockSourceEvent.getField("keys")).thenReturn(fieldValues);
+    when(mockSourceEvent.getAllFields()).thenReturn(new Object[] { 12345, 1777568453165L, fieldValues });
+    when(mockSourceEvent.getProperties()).thenReturn(Collections.emptySet());
+
+    GeoEvent mockOut = mock(GeoEvent.class);
+    when(mockGeoEventCreator.create(eq("guid-out-null-children"), any(Object[].class))).thenReturn(mockOut);
+
+    processor.process(mockSourceEvent);
+
+    ArgumentCaptor<Object[]> payloadCaptor = ArgumentCaptor.forClass(Object[].class);
+    verify(mockGeoEventCreator, timeout(2000).times(3)).create(eq("guid-out-null-children"), payloadCaptor.capture());
+    verify(mockGeoEventProducer, timeout(2000).times(3)).send(any(GeoEvent.class));
+
+    List<Object[]> payloads = payloadCaptor.getAllValues();
+    assertSplitPayload(payloads.get(0), "red", 0);
+    assertSplitPayload(payloads.get(1), "green", 1);
+    assertSplitPayload(payloads.get(2), "blue", 2);
+  }
+
   // ── Helpers ──
+
+  private static void assertSplitPayload(Object[] payload, String expectedValue, int expectedChildIndex)
+  {
+    Object[] preservedFields = (Object[]) payload[0];
+    assertEquals(12345, preservedFields[0]);
+    assertEquals(1777568453165L, preservedFields[1]);
+
+    Object[] splitFields = (Object[]) payload[1];
+    assertEquals(expectedValue, splitFields[0]);
+    assertEquals(expectedChildIndex, splitFields[1]);
+  }
 
   @SuppressWarnings("unchecked")
   private static <T> T getPrivateField(Object target, String fieldName) throws Exception
