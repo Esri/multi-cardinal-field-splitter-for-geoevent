@@ -26,12 +26,17 @@ package com.esri.geoevent.processor.multicardinalfieldsplitter;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Observable;
+import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import org.osgi.framework.ServiceReference;
@@ -65,6 +70,8 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
 {
   private static final BundleLogger log              = BundleLoggerFactory.getLogger(MulticardinalFieldSplitter.class);
   private static final String       INDEX_FIELD_NAME = "childIndex";
+  private static final int          SPLIT_THREAD_COUNT = Math.max(2, Runtime.getRuntime().availableProcessors());
+  private static final int          SPLIT_QUEUE_CAPACITY = 1024;
 
   private final Map<String, String>       edMapper         = new ConcurrentHashMap<>();
   private ServiceTracker<?, ?>      geoEventDefinitionManagerTracker;
@@ -73,7 +80,6 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   private GeoEventCreator           geoEventCreator;
   private GeoEventProducer          geoEventProducer;
   private String                    fieldToSplit;
-  private FieldDefinition           fieldDefinitionToSplit;
 
   private String                    geoEventDefinitionName;
   private ExecutorService           executor;
@@ -115,11 +121,24 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
   {
     if(geoEvent != null){
       GeoEventSplitter splitter = new GeoEventSplitter(geoEvent);
-      if (executor == null || executor.isShutdown() || executor.isTerminated())
-        executor = Executors.newCachedThreadPool();
-      executor.execute(splitter);
+      try
+      {
+        getExecutor().execute(splitter);
+      }
+      catch (RejectedExecutionException e)
+      {
+        log.warn("Field Cardinal Split dropped GeoEvent {0}. Split executor queue is full.", geoEvent.getGuid());
+      }
     }
     return null;
+  }
+
+  private synchronized ExecutorService getExecutor()
+  {
+    if (executor == null || executor.isShutdown() || executor.isTerminated())
+      executor = new ThreadPoolExecutor(SPLIT_THREAD_COUNT, SPLIT_THREAD_COUNT, 30L, TimeUnit.SECONDS,
+          new ArrayBlockingQueue<>(SPLIT_QUEUE_CAPACITY));
+    return executor;
   }
 
   @Override
@@ -169,7 +188,6 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
     geoEventCreator = messaging.createGeoEventCreator();
   }
 
-  @SuppressWarnings("unchecked")
   private void fieldCardinalSplit(GeoEvent sourceGeoEvent) throws MessagingException
   {
     if (geoEventCreator != null)
@@ -179,13 +197,13 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
         GeoEventDefinition ed = sourceGeoEvent.getGeoEventDefinition();
         log.trace("Splitting incoming definition {0}", ed);
         FieldDefinition fdToSplit = ed.getFieldDefinition(fieldToSplit);
-        fieldDefinitionToSplit = fdToSplit;
+        // Missing or wrongly named split fields still fall through to the generic error log below.
         log.trace("Splitting field named {0} with definition {1}", fieldToSplit, fdToSplit);
 
-        GeoEventDefinition edOut = lookup(sourceGeoEvent.getGeoEventDefinition());
+        GeoEventDefinition edOut = lookup(sourceGeoEvent.getGeoEventDefinition(), fdToSplit);
         if (Thread.interrupted())
           return;
-        if (fieldDefinitionToSplit.getType() == FieldType.Group)
+        if (fdToSplit.getType() == FieldType.Group)
         {
           int childId = 0;
           log.trace("Field definition to split is a group");
@@ -220,9 +238,15 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
         }
         else
         {
-          log.debug("Field defintion to split is not a group: {0}", fieldDefinitionToSplit.getType());
-          List<Object> fieldValues = (List<Object>) sourceGeoEvent.getField(fieldToSplit);
-          if (fieldValues == null || fieldValues.size() <= 0)
+          log.debug("Field defintion to split is not a group: {0}", fdToSplit.getType());
+          Object fieldValue = sourceGeoEvent.getField(fieldToSplit);
+          if (fieldValue != null && !(fieldValue instanceof List<?>))
+          {
+            log.error("Field Cardinal Split failed. Field {0} value is not a list: {1}", fieldToSplit, fieldValue.getClass().getName());
+            return;
+          }
+          List<?> fieldValues = (List<?>) fieldValue;
+          if (fieldValues == null || fieldValues.isEmpty())
           {
             log.trace("Field to split value list is null.");
             appendFieldValuesAndSend(sourceGeoEvent, edOut, null, getSplitFieldOutputFieldCount(fdToSplit), -1);
@@ -268,13 +292,12 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
       {
         result[index] = ((FieldGroup) v).getField(index);
       }
-      result[fieldCount] = childId;
     }
     else
     {
       result[0] = v;
-      result[1] = childId;
     }
+    result[fieldCount] = childId;
 
     int fieldToSplitIndex = sourceGeoEvent.getGeoEventDefinition().getIndexOf(fieldToSplit);
     Object[] allFieldValues = sourceGeoEvent.getAllFields();
@@ -312,14 +335,15 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
     send(geoEventOut);
   }
 
-  synchronized private GeoEventDefinition lookup(GeoEventDefinition edIn) throws Exception
+  synchronized private GeoEventDefinition lookup(GeoEventDefinition edIn, FieldDefinition fdToSplit) throws Exception
   {
     GeoEventDefinition edOut = edMapper.containsKey(edIn.getGuid()) ? geoEventDefinitionManager.getGeoEventDefinition(edMapper.get(edIn.getGuid())) : null;
     if (edOut == null)
     {
 
       final List<FieldDefinition> fds = new ArrayList<>();
-      List<FieldDefinition> childFieldDefinitions = fieldDefinitionToSplit.getChildren();
+      Set<String> usedFieldNames = getOutputFieldNames(edIn, fdToSplit);
+      List<FieldDefinition> childFieldDefinitions = fdToSplit.getChildren();
       if (childFieldDefinitions != null)
       {
         childFieldDefinitions.forEach(childFieldDef ->
@@ -335,24 +359,23 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
         });
       }
 
-      String newIndexFieldName = getUniqueFieldName(edIn, fieldToSplit + "_", INDEX_FIELD_NAME, true);
-      FieldDefinition childFd = new DefaultFieldDefinition(newIndexFieldName, FieldType.Integer);
-
       if (!fds.isEmpty())
       {
         log.trace("Augmenting definition to reduce split field and add splitfield childeren");
-        updateChildFieldNames(edIn, fds);
+        updateChildFieldNames(usedFieldNames, fds);
 
-        // remove the split field, add the child fields, add the child index field
-        edOut = edIn.reduce(Arrays.asList(fieldDefinitionToSplit.getName())).augment(fds).augment(Arrays.asList(childFd));
       }
       else
       {
         log.trace("child field definitions of split field are null, using same definition.");
-        FieldDefinition fd = (FieldDefinition) fieldDefinitionToSplit.clone();
+        FieldDefinition fd = (FieldDefinition) fdToSplit.clone();
         fd.setCardinality(FieldCardinality.One);
-        edOut = edIn.reduce(Arrays.asList(fieldDefinitionToSplit.getName())).augment(Arrays.asList(fd)).augment(Arrays.asList(childFd));
+        fds.add(fd);
       }
+      String newIndexFieldName = getUniqueFieldName(usedFieldNames, fieldToSplit + "_", INDEX_FIELD_NAME, true);
+      FieldDefinition childFd = new DefaultFieldDefinition(newIndexFieldName, FieldType.Integer);
+      // remove the split field, add the child fields, add the child index field
+      edOut = edIn.reduce(Arrays.asList(fdToSplit.getName())).augment(fds).augment(Arrays.asList(childFd));
       edOut.setOwner(getId());
       if (!geoEventDefinitionName.isEmpty())
       {
@@ -368,13 +391,13 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
     return edOut;
   }
 
-  private List<FieldDefinition> updateChildFieldNames(GeoEventDefinition edIn, List<FieldDefinition> childFieldDefs)
+  private List<FieldDefinition> updateChildFieldNames(Set<String> usedFieldNames, List<FieldDefinition> childFieldDefs)
   {
     try
     {
       for (FieldDefinition childFieldDef : childFieldDefs)
   {
-        childFieldDef.setName(getUniqueFieldName(edIn, fieldToSplit + "_", childFieldDef.getName(), false));
+        childFieldDef.setName(getUniqueFieldName(usedFieldNames, fieldToSplit + "_", childFieldDef.getName(), false));
       }
     }
     catch (Exception e)
@@ -385,7 +408,22 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
     return childFieldDefs;
   }
 
-  private String getUniqueFieldName(GeoEventDefinition edIn, String prefix, String baseName, boolean alwaysUsePrefix)
+  private Set<String> getOutputFieldNames(GeoEventDefinition edIn, FieldDefinition fdToSplit)
+  {
+    Set<String> usedFieldNames = new HashSet<>();
+    List<FieldDefinition> fieldDefinitions = edIn.getFieldDefinitions();
+    if (fieldDefinitions != null)
+    {
+      for (FieldDefinition field : fieldDefinitions)
+      {
+        if (field != null && field.getName() != null && !field.getName().equalsIgnoreCase(fdToSplit.getName()))
+          addFieldName(usedFieldNames, field.getName());
+      }
+    }
+    return usedFieldNames;
+  }
+
+  private String getUniqueFieldName(Set<String> usedFieldNames, String prefix, String baseName, boolean alwaysUsePrefix)
   {
     int newIndexFieldNameIndex = -1;
     String newIndexFieldName = baseName;
@@ -395,8 +433,8 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
     log.trace("Making sure field name is unique: {0}", newIndexFieldName);
     try
     {
-      FieldDefinition isExisting = findFieldNameIgnoreCase(edIn, newIndexFieldName);
-      while (isExisting != null && newIndexFieldNameIndex < 100)
+      boolean isExisting = containsFieldName(usedFieldNames, newIndexFieldName);
+      while (isExisting && newIndexFieldNameIndex < 100)
       {
         log.trace("Found a matching name, incrementing index on {0}: {1}", newIndexFieldName, newIndexFieldNameIndex);
         ++newIndexFieldNameIndex;
@@ -404,8 +442,8 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
         newIndexFieldName = prefix + baseName;
         if (newIndexFieldNameIndex >= 1)
           newIndexFieldName = prefix + baseName + "__" + newIndexFieldNameIndex;
-        isExisting = findFieldNameIgnoreCase(edIn, newIndexFieldName);
-        if (isExisting == null && newIndexFieldNameIndex >= 100)
+        isExisting = containsFieldName(usedFieldNames, newIndexFieldName);
+        if (!isExisting && newIndexFieldNameIndex >= 100)
           log.debug("Error adding new field, tried 100 times. giving up on {0}", newIndexFieldName);
       }
     }
@@ -413,22 +451,19 @@ public class MulticardinalFieldSplitter extends GeoEventProcessorBase implements
     {
       log.debug("Failed to determine unque index field name", e);
     }
+    addFieldName(usedFieldNames, newIndexFieldName);
     return newIndexFieldName;
   }
 
-  private FieldDefinition findFieldNameIgnoreCase(GeoEventDefinition geoeventDefinition, String name)
+  private void addFieldName(Set<String> usedFieldNames, String name)
   {
-    FieldDefinition result = null;
     if (name != null)
-    {
-      for (FieldDefinition field : geoeventDefinition.getFieldDefinitions())
-      {
-        result = name.equalsIgnoreCase(field.getName()) ? field : null;
-        if (result != null)
-          break;
-      }
-    }
-    return result;
+      usedFieldNames.add(name.toLowerCase(Locale.ROOT));
+  }
+
+  private boolean containsFieldName(Set<String> usedFieldNames, String name)
+  {
+    return name != null && usedFieldNames.contains(name.toLowerCase(Locale.ROOT));
   }
 
   @Override

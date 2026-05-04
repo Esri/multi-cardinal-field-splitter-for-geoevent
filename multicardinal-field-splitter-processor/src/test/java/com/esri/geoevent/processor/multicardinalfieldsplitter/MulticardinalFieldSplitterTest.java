@@ -4,6 +4,9 @@ import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -20,6 +23,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import org.mockito.Mock;
+import static org.mockito.Mockito.after;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
@@ -202,6 +207,23 @@ class MulticardinalFieldSplitterTest
   {
     GeoEvent mockEvent = mock(GeoEvent.class);
     assertNull(processor.process(mockEvent), "process() always returns null (sends asynchronously)");
+    ExecutorService executor = getPrivateField(processor, "executor");
+    assertTrue(executor instanceof ThreadPoolExecutor);
+    executor.shutdownNow();
+  }
+
+  @Test
+  void processDropsEventWhenExecutorRejects() throws Exception
+  {
+    ExecutorService rejectingExecutor = mock(ExecutorService.class);
+    doThrow(new RejectedExecutionException("full")).when(rejectingExecutor).execute(any(Runnable.class));
+    setPrivateField(processor, "executor", rejectingExecutor);
+
+    GeoEvent mockEvent = mock(GeoEvent.class);
+    when(mockEvent.getGuid()).thenReturn("event-guid");
+
+    assertNull(processor.process(mockEvent));
+    verify(mockEvent, never()).getGeoEventDefinition();
   }
 
   // ── setMessaging ──
@@ -453,6 +475,124 @@ class MulticardinalFieldSplitterTest
   }
 
   @Test
+  void processWithEmptyGroupFieldWritesChildIndexToIndexField() throws Exception
+  {
+    processor.afterPropertiesSet();
+    when(mockMessaging.createGeoEventCreator()).thenReturn(mockGeoEventCreator);
+    when(mockMessaging.createGeoEventProducer(any())).thenReturn(mockGeoEventProducer);
+    processor.setMessaging(mockMessaging);
+    processor.setId("test-id");
+    setPrivateField(processor, "geoEventDefinitionManager", mockDefinitionManager);
+
+    GeoEventDefinition mockEdIn = mock(GeoEventDefinition.class);
+    when(mockEdIn.getGuid()).thenReturn("guid-in-empty-group");
+
+    FieldDefinition childField1 = mock(FieldDefinition.class);
+    when(childField1.getName()).thenReturn("childA");
+    when(childField1.clone()).thenReturn(childField1);
+    FieldDefinition childField2 = mock(FieldDefinition.class);
+    when(childField2.getName()).thenReturn("childB");
+    when(childField2.clone()).thenReturn(childField2);
+
+    FieldDefinition groupFieldDef = mock(FieldDefinition.class);
+    when(groupFieldDef.getType()).thenReturn(FieldType.Group);
+    when(groupFieldDef.getName()).thenReturn("TestGroupField");
+    when(groupFieldDef.getChildren()).thenReturn(Arrays.asList(childField1, childField2));
+
+    when(mockEdIn.getFieldDefinition("TestGroupField")).thenReturn(groupFieldDef);
+    when(mockEdIn.getIndexOf("TestGroupField")).thenReturn(1);
+    when(mockEdIn.getFieldDefinitions()).thenReturn(Collections.emptyList());
+
+    GeoEventDefinition mockEdOut = mock(GeoEventDefinition.class);
+    when(mockEdOut.getGuid()).thenReturn("guid-out-empty-group");
+    GeoEventDefinition mockReduced = mock(GeoEventDefinition.class);
+    when(mockEdIn.reduce(anyList())).thenReturn(mockReduced);
+    GeoEventDefinition mockAugmented1 = mock(GeoEventDefinition.class);
+    when(mockReduced.augment(anyList())).thenReturn(mockAugmented1);
+    when(mockAugmented1.augment(anyList())).thenReturn(mockEdOut);
+
+    GeoEvent mockSourceEvent = mock(GeoEvent.class);
+    when(mockSourceEvent.getGeoEventDefinition()).thenReturn(mockEdIn);
+    when(mockSourceEvent.getFieldGroups("TestGroupField")).thenReturn(Collections.emptyList());
+    when(mockSourceEvent.getAllFields()).thenReturn(new Object[] { "val0", Collections.emptyList(), "val2" });
+    when(mockSourceEvent.getProperties()).thenReturn(Collections.emptySet());
+
+    GeoEvent mockOut = mock(GeoEvent.class);
+    when(mockGeoEventCreator.create(eq("guid-out-empty-group"), any(Object[].class))).thenReturn(mockOut);
+
+    processor.process(mockSourceEvent);
+
+    ArgumentCaptor<Object[]> payloadCaptor = ArgumentCaptor.forClass(Object[].class);
+    verify(mockGeoEventCreator, timeout(2000)).create(eq("guid-out-empty-group"), payloadCaptor.capture());
+    verify(mockGeoEventProducer, timeout(2000)).send(any(GeoEvent.class));
+
+    Object[] payload = payloadCaptor.getValue();
+    Object[] preservedFields = (Object[]) payload[0];
+    assertEquals("val0", preservedFields[0]);
+    assertEquals("val2", preservedFields[1]);
+
+    Object[] splitFields = (Object[]) payload[1];
+    assertNull(splitFields[0]);
+    assertNull(splitFields[1]);
+    assertEquals(-1, splitFields[2]);
+  }
+
+  @Test
+  @SuppressWarnings({ "rawtypes", "unchecked" })
+  void processWithGeneratedIndexNameAvoidsPromotedChildCollision() throws Exception
+  {
+    processor.afterPropertiesSet();
+    when(mockMessaging.createGeoEventCreator()).thenReturn(mockGeoEventCreator);
+    when(mockMessaging.createGeoEventProducer(any())).thenReturn(mockGeoEventProducer);
+    processor.setMessaging(mockMessaging);
+    processor.setId("test-id");
+    setPrivateField(processor, "geoEventDefinitionManager", mockDefinitionManager);
+
+    GeoEventDefinition mockEdIn = mock(GeoEventDefinition.class);
+    when(mockEdIn.getGuid()).thenReturn("guid-in-index-collision");
+
+    FieldDefinition childField = mock(FieldDefinition.class);
+    when(childField.getName()).thenReturn("TestGroupField_childIndex");
+    when(childField.clone()).thenReturn(childField);
+
+    FieldDefinition groupFieldDef = mock(FieldDefinition.class);
+    when(groupFieldDef.getType()).thenReturn(FieldType.Group);
+    when(groupFieldDef.getName()).thenReturn("TestGroupField");
+    when(groupFieldDef.getChildren()).thenReturn(Arrays.asList(childField));
+
+    when(mockEdIn.getFieldDefinition("TestGroupField")).thenReturn(groupFieldDef);
+    when(mockEdIn.getIndexOf("TestGroupField")).thenReturn(0);
+    when(mockEdIn.getFieldDefinitions()).thenReturn(Collections.emptyList());
+
+    GeoEventDefinition mockEdOut = mock(GeoEventDefinition.class);
+    when(mockEdOut.getGuid()).thenReturn("guid-out-index-collision");
+    GeoEventDefinition mockReduced = mock(GeoEventDefinition.class);
+    when(mockEdIn.reduce(anyList())).thenReturn(mockReduced);
+    GeoEventDefinition mockAugmented1 = mock(GeoEventDefinition.class);
+    when(mockReduced.augment(anyList())).thenReturn(mockAugmented1);
+    when(mockAugmented1.augment(anyList())).thenReturn(mockEdOut);
+
+    GeoEvent mockSourceEvent = mock(GeoEvent.class);
+    when(mockSourceEvent.getGeoEventDefinition()).thenReturn(mockEdIn);
+    when(mockSourceEvent.getAllFields()).thenReturn(new Object[] { "group-values" });
+    when(mockSourceEvent.getProperties()).thenReturn(Collections.emptySet());
+
+    FieldGroup fieldGroup = mock(FieldGroup.class);
+    when(fieldGroup.getField(0)).thenReturn("childValue");
+    when(mockSourceEvent.getFieldGroups("TestGroupField")).thenReturn(Arrays.asList(fieldGroup));
+
+    GeoEvent mockOut = mock(GeoEvent.class);
+    when(mockGeoEventCreator.create(eq("guid-out-index-collision"), any(Object[].class))).thenReturn(mockOut);
+
+    processor.process(mockSourceEvent);
+
+    ArgumentCaptor<List> indexFieldCaptor = ArgumentCaptor.forClass(List.class);
+    verify(mockAugmented1, timeout(2000)).augment(indexFieldCaptor.capture());
+    FieldDefinition indexField = (FieldDefinition) indexFieldCaptor.getValue().get(0);
+    assertEquals("TestGroupField_childIndex__1", indexField.getName());
+  }
+
+  @Test
   void processWithNonGroupFieldSplitsList() throws Exception
   {
     // Set up processor state
@@ -559,6 +699,47 @@ class MulticardinalFieldSplitterTest
     assertSplitPayload(payloads.get(0), "red", 0);
     assertSplitPayload(payloads.get(1), "green", 1);
     assertSplitPayload(payloads.get(2), "blue", 2);
+  }
+
+  @Test
+  void processWithScalarValueDoesNotCreateOutputEvent() throws Exception
+  {
+    processor.afterPropertiesSet();
+    when(mockMessaging.createGeoEventCreator()).thenReturn(mockGeoEventCreator);
+    when(mockMessaging.createGeoEventProducer(any())).thenReturn(mockGeoEventProducer);
+    processor.setMessaging(mockMessaging);
+    processor.setId("test-id");
+    setPrivateField(processor, "geoEventDefinitionManager", mockDefinitionManager);
+
+    GeoEventDefinition mockEdIn = mock(GeoEventDefinition.class);
+    when(mockEdIn.getGuid()).thenReturn("guid-in-scalar");
+
+    FieldDefinition scalarFieldDef = mock(FieldDefinition.class);
+    FieldDefinition clonedScalarFieldDef = mock(FieldDefinition.class);
+    when(scalarFieldDef.getType()).thenReturn(FieldType.String);
+    when(scalarFieldDef.getName()).thenReturn("TestGroupField");
+    when(scalarFieldDef.getChildren()).thenReturn(null);
+    when(scalarFieldDef.clone()).thenReturn(clonedScalarFieldDef);
+
+    when(mockEdIn.getFieldDefinition("TestGroupField")).thenReturn(scalarFieldDef);
+    when(mockEdIn.getFieldDefinitions()).thenReturn(Collections.emptyList());
+
+    GeoEventDefinition mockEdOut = mock(GeoEventDefinition.class);
+    when(mockEdOut.getGuid()).thenReturn("guid-out-scalar");
+    GeoEventDefinition mockReduced = mock(GeoEventDefinition.class);
+    when(mockEdIn.reduce(anyList())).thenReturn(mockReduced);
+    GeoEventDefinition mockAugmented = mock(GeoEventDefinition.class);
+    when(mockReduced.augment(anyList())).thenReturn(mockAugmented);
+    when(mockAugmented.augment(anyList())).thenReturn(mockEdOut);
+
+    GeoEvent mockSourceEvent = mock(GeoEvent.class);
+    when(mockSourceEvent.getGeoEventDefinition()).thenReturn(mockEdIn);
+    when(mockSourceEvent.getField("TestGroupField")).thenReturn("not-a-list");
+
+    processor.process(mockSourceEvent);
+
+    verify(mockGeoEventCreator, after(500).never()).create(any(String.class), any(Object[].class));
+    verify(mockGeoEventProducer, after(500).never()).send(any(GeoEvent.class));
   }
 
   // ── Helpers ──
